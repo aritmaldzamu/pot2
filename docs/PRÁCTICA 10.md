@@ -935,6 +935,11 @@ void loop(){
 - La interpolación por rampa minimizó vibraciones y aumentó la estabilidad visual y mecánica del sistema.
 
 ---
+## Video del Funcionamiento Final
+🎥 https://www.youtube.com/watch?v=ID_DEL_VIDEO](https://www.youtube.com/watch?v=zepItAOh-Lk
+🎥 https://www.youtube.com/watch?v=MQ0QVBZc3m0
+
+---
 
 ## 9) Conclusiones
 
