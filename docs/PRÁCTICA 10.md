@@ -1,53 +1,43 @@
-# 📚 Práctica 8: Control de LEDs con ESP32 mediante Servidor Web Interactivo
+# 📚Práctica 10 (P10): Procesamiento de Monedas con Operaciones Morfológicas
 ---
 
 ## 1) Resumen
 
-- **Equipo / Autor(es):**  _Karen Najera y Arith Maldonado_
+- **Equipo / Autor(es):**  _Arith Maldonado_
 - **Curso / Asignatura:** _Elementos programables II_  
 - **Fecha:** _29/09/2025_  
-- **Descripción breve:** _En esta práctica se configuró un ESP32 como servidor web para controlar dos LEDs mediante sliders (control PWM) y uno adicional a través de un botón de encendido/apagado en una interfaz web. También se incorporó una caja de texto para enviar datos al ESP32 desde la misma página. Todo esto permite simular una interfaz de control básica para un sistema embebido conectado a red, sentando las bases para aplicaciones IoT._
+- **Descripción breve:** _En esta práctica se procesó una imagen de un conjunto de monedas aplicando filtrado por color, umbralización y operaciones morfológicas (erosión y dilatación) para aislar los objetos de interés y retirar el fondo. Se identificaron contornos y se generó una máscara para extraer únicamente las monedas detectadas mediante procesamiento digital de imágenes._
 
 
 ---
 
 ## 2) Objetivos
 
-- **General:** _Comprender e implementar un servidor web sobre el ESP32 que permita el control interactivo de periféricos en tiempo real a través de una interfaz web._
+- **General:** _Aplicar operaciones de morfología digital utilizando OpenCV para segmentar objetos en una imagen y aislar regiones mediante filtrado y contornos._
 - **Específicos:**
-  - _Configurar una página HTML embebida que incluya controles interactivos como sliders, botones y cajas de texto._
-  - _Implementar funciones en el servidor web para recibir valores y aplicarlos al hardware físico (pines PWM y digitales)._
-  - _Utilizar funciones de mapeo PWM para controlar brillo o velocidad de motores._
+  - _Separar canales de color para descartar fondo no deseado._
+  - _Aplicar umbral para resaltar bordes brillantes presentes en las monedas._
 
 ## 3) Alcance y Exclusiones
 
 - **Incluye:** 
--_Control de dos salidas PWM mediante sliders en una interfaz web._
+-_Aplicación de umbralización para resaltar los bordes brillantes de las monedas._
 
--_Control de un LED (ON/OFF) mediante un botón en la misma página._
-
--_Recepción de texto desde una caja de entrada y su impresión en el monitor serial._
-
--_No se implementa autenticación ni seguridad en el servidor web._
-
--_No se utilizan librerías externas avanzadas, únicamente WiFi.h y WebServer.h.._
-
--_No se contempla la regulación analógica directa del LED controlado por botón (solo ON/OFF)_
+-_Uso de operaciones morfológicas para cierre de contornos._
 
 ---
 
 ## 4) Resultados
-_Al subir el programa al ESP32 y conectarlo a la red WiFi, el monitor serial muestra la dirección IP local asignada. Esta dirección es introducida en un navegador dentro de la misma red para abrir la interfaz web.
+Al procesar la imagen, el filtrado por color permitió eliminar el fondo rojo sin afectar las monedas.
 
-_La página principal permite controlar un LED mediante un botón que cambia dinámicamente su estado de “ON” a “OFF”. Para los otros dos LEDs, se accede a través de rutas específicas (/on1, /off1, /on2, /off2) en la URL, lo cual permite verificar el funcionamiento del servidor al interpretar diferentes solicitudes HTTP._
 
-_El botón HTML permite encender o apagar un LED (pin LED_BUILTIN) de forma remota, con cambios dinámicos en el texto del botón y estado del LED._
+La umbralización resaltó las zonas brillantes correspondientes al aro metálico de cada moneda.
 
-_Los sliders permiten modificar valores de 0 a 180, los cuales son mapeados a un rango de señal PWM (205 a 410). Esto se refleja en la intensidad de salida en los pines definidos por #define pwm 3 y #define pwm1 2, ideal para el control de brillo de LEDs o velocidad de servomotores._
+Las operaciones morfológicas de dilatación y erosión permitieron cerrar los contornos incompletos, reduciendo ruido y rellenando discontinuidades.
 
-_Al escribir en la caja de texto y presionar “Enviar”, el valor se muestra en el monitor serial como confirmación de recepción._
+La detección de contornos permitió identificar cada moneda aislada, generando una máscara que extrae únicamente las regiones válidas de la imagen.
 
-_Todas las acciones generan peticiones HTTP (GET) que el servidor del ESP32 interpreta correctamente, generando una respuesta inmediata y modificando salidas físicas._
+Los resultados muestran con claridad las monedas aisladas del resto de la imagen, confirmando el funcionamiento del procesamiento aplicado.
 
 ---
 
@@ -55,150 +45,58 @@ _Todas las acciones generan peticiones HTTP (GET) que el servidor del ESP32 inte
 
 ``` cpp
 
-#include <WiFi.h>
-#include <WebServer.h>
-
-#define pwm 3
-#define pwm1 2
-
-const char* ssid = "iPhone";
-const char* password = "karennajera";
-
-WebServer servidor(80);
-
-const int ledPin = LED_BUILTIN;
-String ledState = "OFF";
-int sliderValue = 0;
-int sliderValue1 = 0;
-
-const char htmlTemplate[] PROGMEM = R"rawliteral(
-<!DOCTYPE html>
-<html>
-  <head>
-    <meta charset="UTF-8">
-    <title>Control de LED ESP32</title>
-  </head>
-  <body>
-    <h1>Control de LED ESP32</h1>
-    <p>El LED está %LED_STATE%</p>
-    <a href="/%LINK%"><button>%BUTTON_TEXT%</button></a>
-    <br><br>
-    <h2>Control del Slider</h2>
-    <input type="range" min="0" max="180" value="%SLIDER_VALUE%" id="slider" oninput="updateSlider(this.value)">
-    <span id="sliderValue">%SLIDER_VALUE%</span>
-    <br><br>
-    <h2>Segundo Slider</h2>
-    <input type="range" min="0" max="180" value="%SLIDER_VALUE1%" id="slider1" oninput="updateSlider1(this.value)">
-    <span id="sliderValue1">%SLIDER_VALUE1%</span>
-    <br><br>
-    <h2>Ingresar Texto</h2>
-    <input type="text" id="txtInput" placeholder="Escribe algo...">
-    <button onclick="sendText()">Enviar</button>
-
-    <script>
-      function updateSlider(value) {
-        document.getElementById('sliderValue').innerText = value;
-        var xhr = new XMLHttpRequest();
-        xhr.open("GET", "/slider?value=" + encodeURIComponent(value), true);
-        xhr.send();
-      }
-      function updateSlider1(value) {
-        document.getElementById('sliderValue1').innerText = value;
-        var xhr = new XMLHttpRequest();
-        xhr.open("GET", "/slider1?value=" + encodeURIComponent(value), true);
-        xhr.send();
-      }
-      function sendText() {
-        var textValue = document.getElementById('txtInput').value;
-        var xhr = new XMLHttpRequest();
-        xhr.open("GET", "/textbox?value=" + encodeURIComponent(textValue), true);
-        xhr.send();
-      }
-    </script>
-  </body>
-</html>
-)rawliteral;
-
-void handleroot() {
-  String html = String(htmlTemplate);
-  html.replace("%LED_STATE%", ledState);
-  html.replace("%SLIDER_VALUE%", String(sliderValue));
-  html.replace("%SLIDER_VALUE1%", String(sliderValue1));
-  if (ledState == "OFF") {
-    html.replace("%LINK%", "ON");
-    html.replace("%BUTTON_TEXT%", "Encender");
-  } else {
-    html.replace("%LINK%", "OFF");
-    html.replace("%BUTTON_TEXT%", "Apagar");
-  }
-  servidor.send(200, "text/html", html);
-}
-
-void handleOn() {
-  digitalWrite(ledPin, HIGH);
-  ledState = "ON";
-  handleroot();
-}
-
-void handleOff() {
-  digitalWrite(ledPin, LOW);
-  ledState = "OFF";
-  handleroot();
-}
-
-void handleSlider() {
-  if (servidor.hasArg("value")) {
-    sliderValue = servidor.arg("value").toInt();
-    Serial.println("Valor del slider: " + String(sliderValue));
-    int duty = map(sliderValue, 0, 180, 205, 410);
-    ledcWrite(pwm, duty);
-  }
-  servidor.send(200, "text/plain", "OK");
-}
-
-void handleSlider1() {
-  if (servidor.hasArg("value")) {
-    sliderValue1 = servidor.arg("value").toInt();
-    Serial.println("Valor del segundo slider: " + String(sliderValue1));
-    int duty1 = map(sliderValue1, 0, 180, 205, 410);
-    ledcWrite(pwm1, duty1);
-  }
-  servidor.send(200, "text/plain", "OK");
-}
-
-void handleTextbox() {
-  if (servidor.hasArg("value")) {
-    String textValue = servidor.arg("value");
-    Serial.println("Texto recibido: " + textValue);
-  }
-  servidor.send(200, "text/plain", "OK");
-}
-
-void setup() {
-  Serial.begin(115200);
-  pinMode(ledPin, OUTPUT);
-  digitalWrite(ledPin, LOW);
-  ledcAttachChannel(pwm, 50, 12, 0);
-  ledcAttachChannel(pwm1, 50, 12, 1);
-
-  WiFi.begin(ssid, password);
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
-  }
-
-  Serial.println("\nWiFi conectado");
-  Serial.println(WiFi.localIP());
-
-  servidor.on("/", handleroot);
-  servidor.on("/ON", handleOn);
-  servidor.on("/OFF", handleOff);
-  servidor.on("/slider", handleSlider);
-  servidor.on("/slider1", handleSlider1);
-  servidor.on("/textbox", handle
+import cv2
+import numpy as np
+# --- carga y resize ---
+img = cv2.imread("images/Coins4.jpg")
+h, w = img.shape[:2]
+MAX_W, MAX_H = 1080, 720
+scale = min(MAX_W / w, MAX_H / h, 1.0)
+if scale < 1.0:
+    img = cv2.resize(img, (int(w*scale), int(h*scale)), interpolation=cv2.INTER_AREA)
+cv2.imshow("Original", img)
+# --- canales para filtrar rojo (BGR) ---
+b = img[:, :, 0]
+g = img[:, :, 1]
+r = img[:, :, 2]
+# 1) FILTRO: quitar fondo rojo (en BGR)
+R_LOW_BG, G_HIGH_BG, B_HIGH_BG = 145, 110, 110
+mask_bg_red = cv2.bitwise_and(
+    cv2.inRange(r, R_LOW_BG, 255),
+    cv2.bitwise_and(cv2.inRange(g, 0, G_HIGH_BG),
+                    cv2.inRange(b, 0, B_HIGH_BG))
+)
+mask_not_red = cv2.bitwise_not(mask_bg_red)
+# 2) ESCALA DE GRISES
+gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+cv2.imshow("Gris", gray)
+# 3) UMBRAL ALTO PARA QUEDARTE CON EL ARO (borde brillante)
+T_RING = 80
+_, ring = cv2.threshold(gray, T_RING, 255, cv2.THRESH_BINARY)
+# quitar cualquier aro que esté sobre el tapete rojo
+ring = cv2.bitwise_and(ring, mask_not_red)
+cv2.imshow("Aro en gris", ring)
+# 4) MORFOLOGÍA: cerrar el aro (mismas ops de clase)
+kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+ring_closed = cv2.dilate(ring, kernel, iterations=3)
+ring_closed = cv2.erode (ring_closed, kernel, iterations=4)
+cv2.imshow("Aro cerrado", ring_closed)
+# 5) CONTORNOS sobre el aro cerrado
+contours, _ = cv2.findContours(ring_closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+img_contours = img.copy()
+cv2.drawContours(img_contours, contours, -1, (0, 255, 0), 2)
+cv2.imshow("Monedas por contorno", img_contours)
+mask_fill = np.zeros_like(gray)
+cv2.drawContours(mask_fill, contours, -1, 255, thickness=-1)  # -1 = rellenar
+cv2.imshow("Mascara rellena desde contorno", mask_fill)
+result = cv2.bitwise_and(img, img, mask=mask_fill)
+cv2.imshow("Monedas rellenas (desde contorno)", result)
+while True:
+    if cv2.waitKey(20) == 27:
+        break
+cv2.destroyAllWindows()
 ```
 
 ## 5) Conclusión
-_La práctica permitió comprobar que el ESP32 puede actuar como un servidor web funcional que permite controlar periféricos en tiempo real desde una interfaz gráfica. El sistema implementado constituye una base sólida para aplicaciones más complejas del Internet de las Cosas (IoT), como domótica, monitoreo remoto o automatización industrial._
+_La práctica permitió comprobar que las operaciones morfológicas son fundamentales para la segmentación efectiva de objetos en una escena, especialmente cuando existen irregularidades o ruido visual. El filtrado basado en canales de color permitió descartar el fondo sin afectar el objeto de interés, mientras que la umbralización destacó características relevantes como el brillo del aro. Se concluye que el procesamiento mediante erosión, dilatación y contornos es una técnica eficiente para extraer objetos de interés en imágenes, representando una base sólida para futuras aplicaciones como conteo, clasificación o inspección automática._
 
-_La integración entre HTML, JavaScript y el servidor embebido del ESP32 permite la creación de interfaces intuitivas que facilitan la interacción hombre-máquina sin necesidad de aplicaciones externas. Además, el manejo de señales PWM desde el navegador extiende la utilidad del sistema para control preciso de actuadores. Se concluye que el ESP32 es una herramienta poderosa, flexible y accesible para el desarrollo de sistemas embebidos conectados a red.._
